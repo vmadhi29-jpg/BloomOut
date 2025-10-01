@@ -1,31 +1,27 @@
 
-
-import { GoogleGenAI, Chat, Type } from "@google/genai";
+import { GoogleGenAI, Chat, Type, GenerateContentResponse } from "@google/genai";
 
 const root = document.getElementById('root');
 
-if (typeof process === 'undefined' || typeof process.env === 'undefined') {
+if (typeof process === 'undefined' || typeof process.env === 'undefined' || !process.env.API_KEY) {
     const errorHTML = `
       <div class="min-h-screen flex flex-col items-center justify-center p-4">
         <div class="content-card max-w-lg w-full p-8 text-center rounded-2xl shadow-2xl text-white">
             <h1 class="text-3xl font-bold mb-4">Configuration Error</h1>
             <p class="text-slate-300">
-                This application requires an environment where the API key can be securely provided.
+                This application requires an API key to be configured for it to function.
             </p>
             <p class="text-slate-400 mt-4 text-sm">
-                It appears <code>process.env.API_KEY</code> is not available, which is common when running directly in a browser. For deployment on services like GitHub Pages, a build step is needed to substitute the API key.
+                It appears <code>process.env.API_KEY</code> is not available. If you are a developer, please ensure the API key is set up in your deployment environment. If you are a user, please contact the site administrator.
             </p>
         </div>
       </div>
     `;
     if(root) root.innerHTML = errorHTML;
-    throw new Error("Execution environment does not provide process.env. The application cannot run without an API key.");
+    throw new Error("API_KEY is not available in the environment. The application cannot run.");
 }
 
 const API_KEY = process.env.API_KEY;
-if (!API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 let openChat: Chat | null = null;
@@ -148,9 +144,33 @@ type AchievementID = keyof typeof achievements;
 
 type ConversationTurn = { role: 'user' | 'model'; text: string; };
 
+type Progress = {
+    unlockedAchievements: AchievementID[];
+    conversationStats: {
+        count: number;
+        completedCategories: string[];
+    };
+    journalStats: {
+        count: number;
+    };
+};
+
+
 // --- UTILITY & ACHIEVEMENT FUNCTIONS ---
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
+
+// FIX: Added a trailing comma to the generic type parameter `<T,>` to resolve parsing ambiguity in TSX files, which was likely causing a cascade of errors.
+const getLocalStorageItem = <T,>(key: string, defaultValue: T): T => {
+    const itemRaw = localStorage.getItem(key);
+    if (!itemRaw) return defaultValue;
+    try {
+        return JSON.parse(itemRaw) as T;
+    } catch (e) {
+        console.error(`Failed to parse ${key} from localStorage`, e);
+        return defaultValue;
+    }
+};
 
 const applyTheme = (themeName: string) => {
     const body = document.body;
@@ -169,6 +189,7 @@ const loadTheme = () => {
 };
 
 const applyMood = (mood: 'default' | 'calm') => {
+    // FIX: Define the 'body' constant, which was used without being declared.
     const body = document.body;
     if (mood === 'calm') {
         body.classList.add('theme-calm', 'dim-mode');
@@ -184,17 +205,16 @@ const loadMood = () => {
 };
 
 
-const getProgress = () => {
-    const progressRaw = localStorage.getItem('bloomout_progress');
-    const defaultProgress = {
+const getProgress = (): Progress => {
+    const defaultProgress: Progress = {
         unlockedAchievements: [],
         conversationStats: { count: 0, completedCategories: [] },
         journalStats: { count: 0 }
     };
-    return progressRaw ? JSON.parse(progressRaw) : defaultProgress;
+    return getLocalStorageItem('bloomout_progress', defaultProgress);
 };
 
-const saveProgress = (progress: any) => {
+const saveProgress = (progress: Progress) => {
     localStorage.setItem('bloomout_progress', JSON.stringify(progress));
 };
 
@@ -220,7 +240,9 @@ const showAchievementPopup = (achievementID: AchievementID) => {
     setTimeout(() => {
         popup.classList.remove('visible');
         setTimeout(() => {
-            document.body.removeChild(popup);
+            if (document.body.contains(popup)) {
+                 document.body.removeChild(popup);
+            }
         }, 500);
     }, 4000);
 };
@@ -271,31 +293,83 @@ const startTimer = (duration: number, timerEl: HTMLElement, onComplete: () => vo
 };
 
 const getPersonalizedSystemInstruction = (baseInstruction: string): string => {
-    const userProfileRaw = localStorage.getItem('userProfile');
-    if (!userProfileRaw) {
-        return baseInstruction;
-    }
+    const profile = getLocalStorageItem('userProfile', {} as Record<string, string>);
+    let profileText = "Here is some information about the user you are talking to, please use it to make the conversation more personal and relevant:\n";
+    let hasInfo = false;
 
-    try {
-        const profile = JSON.parse(userProfileRaw);
-        let profileText = "Here is some information about the user you are talking to, please use it to make the conversation more personal and relevant:\n";
-        let hasInfo = false;
+    if (profile.username) { profileText += `- Their name is ${profile.username}.\n`; hasInfo = true; }
+    if (profile.age) { profileText += `- They are ${profile.age} years old.\n`; hasInfo = true; }
+    if (profile.gender && profile.gender !== 'prefer_not_to_say') { profileText += `- They identify as ${profile.gender}.\n`; hasInfo = true; }
+    if (profile.status) { profileText += `- They are a ${profile.status}.\n`; hasInfo = true; }
+    if (profile.hobby) { profileText += `- Their hobby is ${profile.hobby}.\n`; hasInfo = true; }
+    if (profile.purpose) { profileText += `- They are using this app to '${profile.purpose}'.\n`; hasInfo = true; }
 
-        if (profile.username) { profileText += `- Their name is ${profile.username}.\n`; hasInfo = true; }
-        if (profile.age) { profileText += `- They are ${profile.age} years old.\n`; hasInfo = true; }
-        if (profile.gender && profile.gender !== 'prefer_not_to_say') { profileText += `- They identify as ${profile.gender}.\n`; hasInfo = true; }
-        if (profile.status) { profileText += `- They are a ${profile.status}.\n`; hasInfo = true; }
-        if (profile.hobby) { profileText += `- Their hobby is ${profile.hobby}.\n`; hasInfo = true; }
-        if (profile.purpose) { profileText += `- They are using this app to '${profile.purpose}'.\n`; hasInfo = true; }
-
-        if (hasInfo) {
-            return `${baseInstruction}\n\n${profileText}`;
-        }
-    } catch (e) {
-        console.error("Failed to parse user profile", e);
+    if (hasInfo) {
+        return `${baseInstruction}\n\n${profileText}`;
     }
     
     return baseInstruction;
+};
+
+const showLoadingOverlay = (show: boolean, text = 'Loading...') => {
+    let overlay = document.getElementById('loading-overlay');
+    if (show) {
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'loading-overlay';
+            overlay.className = 'fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-[1001] animate-fade-in flex-col gap-4';
+            overlay.innerHTML = `
+                <div class="loading-spinner"></div>
+                <p class="text-white text-lg font-semibold">${text}</p>
+            `;
+            document.body.appendChild(overlay);
+        }
+    } else {
+        if (overlay) {
+            overlay.classList.remove('animate-fade-in');
+            overlay.classList.add('animate-fade-out');
+            setTimeout(() => overlay?.remove(), 300);
+        }
+    }
+};
+
+const renderInfoDialog = (title: string, contentHTML: string) => {
+    const dialogOverlay = document.createElement('div');
+    dialogOverlay.className = 'fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-[1000] animate-fade-in';
+    
+    const dialogContent = document.createElement('div');
+    dialogContent.className = 'content-card max-w-lg w-full p-8 rounded-2xl shadow-2xl text-white';
+    dialogContent.setAttribute('role', 'alertdialog');
+    dialogContent.setAttribute('aria-modal', 'true');
+    dialogContent.setAttribute('aria-labelledby', 'dialog-title');
+    
+    dialogContent.innerHTML = `
+        <h2 id="dialog-title" class="text-2xl font-bold mb-4 text-center">${title}</h2>
+        <div class="text-slate-300 mb-8 text-left max-h-[50vh] overflow-y-auto chat-container pr-2">${contentHTML}</div>
+        <div class="flex justify-center">
+            <button id="dialog-ok-btn" class="duration-btn font-bold text-lg py-3 px-8 rounded-full shadow-lg">OK</button>
+        </div>
+    `;
+    
+    dialogOverlay.appendChild(dialogContent);
+    document.body.appendChild(dialogOverlay);
+
+    const okBtn = document.getElementById('dialog-ok-btn') as HTMLButtonElement;
+    okBtn.focus();
+
+    const closeDialog = () => {
+        dialogOverlay.classList.remove('animate-fade-in');
+        dialogOverlay.classList.add('animate-fade-out');
+        setTimeout(() => dialogOverlay.remove(), 300);
+    };
+
+    okBtn.addEventListener('click', closeDialog);
+    dialogOverlay.addEventListener('click', (e) => {
+        if (e.target === dialogOverlay) closeDialog();
+    });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeDialog();
+    }, { once: true });
 };
 
 const renderConfirmationDialog = (
@@ -418,9 +492,11 @@ Finally, provide one single, kind, and actionable suggestion for what the user c
             },
             required: ['engagementScore', 'reciprocityScore', 'kindSuggestion']
         };
+        
+        let response: GenerateContentResponse | undefined;
 
         try {
-            const response = await ai.models.generateContent({
+            response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash',
                 contents: `${analysisPrompt}\n\n--- CONVERSATION ---\n${formattedHistory}`,
                 config: {
@@ -428,6 +504,13 @@ Finally, provide one single, kind, and actionable suggestion for what the user c
                     responseSchema: responseSchema,
                 },
             });
+
+            let jsonString = response.text.trim();
+            // The model might wrap the JSON in markdown backticks, so we'll strip them.
+            const jsonMatch = jsonString.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+            if (jsonMatch && jsonMatch[1]) {
+                jsonString = jsonMatch[1];
+            }
 
             // --- Handle Achievements on Successful Analysis ---
             const progress = getProgress();
@@ -445,16 +528,19 @@ Finally, provide one single, kind, and actionable suggestion for what the user c
             if (progress.conversationStats.completedCategories.length === Object.keys(practiceScenarios).length) unlockAchievement('ALL_CATEGORIES');
             // --- End of Achievements ---
 
-            return JSON.parse(response.text);
+            return JSON.parse(jsonString);
         } catch (error) {
             console.error("Analysis Error:", error);
+            if (response) {
+                console.error("Problematic API response text:", response.text);
+            }
             return null;
         }
     };
 
     analyzeConversation().then(analysis => {
         if (!root) return;
-        if (analysis) {
+        if (analysis && analysis.engagementScore && analysis.reciprocityScore && analysis.kindSuggestion) {
             root.innerHTML = `
                 <div class="min-h-screen flex flex-col items-center justify-center p-4 animate-fade-in">
                     <div class="content-card max-w-2xl w-full p-8 sm:p-10 rounded-2xl shadow-2xl text-white">
@@ -730,7 +816,8 @@ const renderPracticeLevels = (goal: string) => {
                     <div class="w-20"></div>
                 </header>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    ${Object.entries(scenario.levels).map(([level, details]) => `
+                    {/* FIX: Explicitly type map parameters to avoid 'details' being inferred as 'any' or 'unknown'. */}
+                    ${Object.entries(scenario.levels).map(([level, details]: [string, { subtitle: string }]) => `
                         <div class="feature-card p-6 rounded-xl text-center" data-level="${level}">
                             <h2 class="text-2xl font-bold mb-2">${level}</h2>
                             <p class="text-slate-300">${details.subtitle}</p>
@@ -792,7 +879,6 @@ const renderPracticeScenarios = () => {
 };
 
 const renderJournalZone = () => {
-    // This is a placeholder for the full Journal Zone functionality
     if (!root) return;
 
     type JournalEntry = {
@@ -806,8 +892,7 @@ const renderJournalZone = () => {
     };
 
     const getJournalEntries = (): JournalEntry[] => {
-        const entriesRaw = localStorage.getItem('journalEntries');
-        return entriesRaw ? JSON.parse(entriesRaw) : [];
+        return getLocalStorageItem<JournalEntry[]>('journalEntries', []);
     };
 
     const saveJournalEntries = (entries: JournalEntry[]) => {
@@ -1014,6 +1099,40 @@ const renderJournalZone = () => {
             renderJournalUI();
         });
 
+        document.getElementById('analyze-btn')?.addEventListener('click', async () => {
+            const title = titleInput.value.trim();
+            const content = editor.value.trim();
+            if (!content) {
+                renderInfoDialog("Empty Entry", "<p>Please write something in your journal before asking for an analysis.</p>");
+                return;
+            }
+        
+            showLoadingOverlay(true, 'Bloom is analyzing...');
+        
+            const analysisPrompt = `You are Bloom, an AI therapist. Analyze the following journal entry from a user. Provide gentle, supportive, and constructive insights based on CBT principles. Identify potential cognitive distortions and offer a reframing perspective. Keep your analysis concise, empathetic, and encouraging.\n\nTitle: ${title}\n\nEntry:\n${content}`;
+        
+            try {
+                const response = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: analysisPrompt,
+                });
+        
+                // Simple markdown-to-html conversion
+                const formattedText = response.text
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>')       // Italics
+                    .replace(/\n/g, '<br>');                     // Newlines
+        
+                renderInfoDialog("Bloom's Analysis", `<p>${formattedText}</p>`);
+                unlockAchievement('REFLECTIVE_MIND');
+            } catch (error) {
+                console.error("Journal Analysis Error:", error);
+                renderInfoDialog("Error", "<p>Sorry, an error occurred while analyzing your entry. Please try again later.</p>");
+            } finally {
+                showLoadingOverlay(false);
+            }
+        });
+
         const deleteBtn = document.getElementById('delete-entry-btn');
         if (deleteBtn) {
             deleteBtn.style.display = selectedEntryId ? 'block' : 'none';
@@ -1109,9 +1228,13 @@ const renderJournalZone = () => {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (file) {
                 const reader = new FileReader();
+                // FIX: Safely access FileReader result and ensure it's a string before assigning to src.
                 reader.onload = (event) => {
-                    imageDisplay.src = event.target?.result as string;
-                    imageDisplay.style.display = 'block';
+                    const result = event.target?.result;
+                    if (typeof result === 'string') {
+                        imageDisplay.src = result;
+                        imageDisplay.style.display = 'block';
+                    }
                 };
                 reader.readAsDataURL(file);
             }
@@ -1132,7 +1255,6 @@ const renderAnxietyReliefZone = () => {
     if (!root) return;
     let breathPhase = 'ready'; // ready -> in -> hold -> out
     let breathTimeout: ReturnType<typeof setTimeout> | null = null;
-    let animationFrameId: number;
 
     root.innerHTML = `
         <div class="min-h-screen flex flex-col items-center justify-center p-4 animate-fade-in">
@@ -1176,7 +1298,6 @@ const renderAnxietyReliefZone = () => {
     addBackButtonListener(() => {
         if(breathTimeout) clearTimeout(breathTimeout);
         if(timerInterval) clearInterval(timerInterval);
-        if (animationFrameId) cancelAnimationFrame(animationFrameId);
         transitionTo(renderDashboard);
     });
 
@@ -1251,7 +1372,9 @@ const renderAnxietyReliefZone = () => {
         }, 10);
         
         setTimeout(() => {
-            document.body.removeChild(flyawayText);
+            if (document.body.contains(flyawayText)) {
+                document.body.removeChild(flyawayText);
+            }
             paperPlane.classList.add('flying');
         }, 800);
 
@@ -1353,7 +1476,7 @@ const renderSettings = () => {
     if (!root) return;
     const savedTheme = localStorage.getItem('selectedTheme') || 'nebula';
     const savedMood = localStorage.getItem('selectedMood') || 'default';
-    const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+    const userProfile = getLocalStorageItem('userProfile', {} as Record<string, string>);
     const userAvatar = localStorage.getItem('userAvatar') || 'star';
 
     root.innerHTML = `
@@ -1484,7 +1607,7 @@ const renderSettings = () => {
 
 const renderDashboard = () => {
     if (!root) return;
-    const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+    const userProfile = getLocalStorageItem('userProfile', { username: 'friend' });
     const username = userProfile.username || 'friend';
     
     root.innerHTML = `
