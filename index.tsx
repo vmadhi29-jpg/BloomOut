@@ -3,6 +3,25 @@
 import { GoogleGenAI, Chat, Type } from "@google/genai";
 
 const root = document.getElementById('root');
+
+if (typeof process === 'undefined' || typeof process.env === 'undefined') {
+    const errorHTML = `
+      <div class="min-h-screen flex flex-col items-center justify-center p-4">
+        <div class="content-card max-w-lg w-full p-8 text-center rounded-2xl shadow-2xl text-white">
+            <h1 class="text-3xl font-bold mb-4">Configuration Error</h1>
+            <p class="text-slate-300">
+                This application requires an environment where the API key can be securely provided.
+            </p>
+            <p class="text-slate-400 mt-4 text-sm">
+                It appears <code>process.env.API_KEY</code> is not available, which is common when running directly in a browser. For deployment on services like GitHub Pages, a build step is needed to substitute the API key.
+            </p>
+        </div>
+      </div>
+    `;
+    if(root) root.innerHTML = errorHTML;
+    throw new Error("Execution environment does not provide process.env. The application cannot run without an API key.");
+}
+
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) {
     throw new Error("API_KEY environment variable not set");

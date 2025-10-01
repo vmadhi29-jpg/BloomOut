@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Impact&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="index.css">
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -19,6 +20,6 @@
 </head>
 <body class="font-sans">
     <div id="root"></div>
-    <script type="module" src="index.tsx"></script>
+    <script type="text/babel" data-presets="typescript" data-type="module" src="index.tsx"></script>
 </body>
 </html>
