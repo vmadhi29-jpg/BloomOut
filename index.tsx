@@ -1779,16 +1779,40 @@ const main = async () => {
     `;
 
     try {
-        // On Vercel, env vars are not exposed to the client by default for security.
-        // The standard practice is to create a simple API route to expose the key.
         const response = await fetch('/api/get-key');
+
         if (!response.ok) {
-            throw new Error(`Network response was not ok, status: ${response.status}`);
+            let title = `Application Error: ${response.status}`;
+            let message = "Could not retrieve the required API configuration from the server.";
+            let details = "This is likely a deployment configuration issue. Please check the server logs for more information.";
+            
+            if (response.status === 404) {
+                title = "API Endpoint Not Found";
+                message = "The server endpoint (<code>/api/get-key</code>) required for initialization could not be found.";
+                details = "If you are the developer, please ensure the serverless function is correctly placed in the <code>/api</code> directory at the project root and is successfully deployed on Vercel.";
+            } else if (response.status === 500) {
+                title = "Server Configuration Error";
+                message = "The server encountered an internal error while trying to provide the API key.";
+                details = "This often means the <code>API_KEY</code> environment variable is missing or incorrect in your Vercel project's settings. Please verify your configuration.";
+            }
+
+            const errorHTML = `
+              <div class="min-h-screen flex flex-col items-center justify-center p-4">
+                <div class="content-card max-w-lg w-full p-8 text-center rounded-2xl shadow-2xl text-white">
+                    <h1 class="text-3xl font-bold mb-4">${title}</h1>
+                    <p class="text-slate-300">${message}</p>
+                    <p class="text-slate-400 mt-4 text-sm">${details}</p>
+                </div>
+              </div>
+            `;
+            root.innerHTML = errorHTML;
+            return; // Stop execution
         }
+
         const config = await response.json();
 
-        if (typeof config.apiKey !== 'string' || config.apiKey.length === 0) {
-             throw new Error("API key is missing or invalid in the response from /api/get-key.");
+        if (config.error || typeof config.apiKey !== 'string' || config.apiKey.length === 0) {
+             throw new Error(config.error || "API key is missing or invalid in the response from /api/get-key.");
         }
 
         ai = new GoogleGenAI({ apiKey: config.apiKey });
@@ -1801,10 +1825,10 @@ const main = async () => {
             <div class="content-card max-w-lg w-full p-8 text-center rounded-2xl shadow-2xl text-white">
                 <h1 class="text-3xl font-bold mb-4">Application Failed to Start</h1>
                 <p class="text-slate-300">
-                    Could not retrieve the required API configuration from the server.
+                    An unexpected network or parsing error occurred. Please check your internet connection and ensure the server is responding correctly.
                 </p>
                 <p class="text-slate-400 mt-4 text-sm">
-                    This is likely a deployment configuration issue. If you are the developer, please ensure the <code>API_KEY</code> environment variable is set on Vercel and the <code>/api/get-key</code> serverless function is correctly implemented to return it.
+                    <strong>Error details:</strong> ${error instanceof Error ? error.message : String(error)}
                 </p>
             </div>
           </div>

@@ -1,28 +1,40 @@
-
-// Vercel will automatically turn this file into a serverless function
-// accessible at the path /api/get-key.
-// This function securely reads the API_KEY from the server environment
-// and sends it to the frontend, which is the standard practice for Vercel deployments.
+// This file is a Vercel Edge Function that securely provides the API key to the client.
+// By using the Edge runtime, it's fast and efficient.
 // Make sure to set the API_KEY in your Vercel project's environment variables.
 
-// We are not using the Vercel-provided request/response types to avoid
-// adding dependencies, but this structure is compatible.
-export default function handler(request, response) {
+export const config = {
+  runtime: 'edge', // Explicitly specify the runtime to resolve build ambiguities
+};
+
+// The request parameter is a standard Web API Request object.
+// The function must return a standard Web API Response object.
+export default function handler(request) {
   // Only allow GET requests
   if (request.method !== 'GET') {
-    response.setHeader('Allow', ['GET']);
-    return response.status(405).end(`Method ${request.method} Not Allowed`);
-  }
-
-  const apiKey = process.env.API_KEY;
-
-  // Check if the environment variable is set on the server
-  if (!apiKey) {
-    return response.status(500).json({ 
-      error: "The API_KEY environment variable is not set on the server." 
+    return new Response(`Method ${request.method} Not Allowed`, {
+      status: 405,
+      headers: {
+        Allow: 'GET',
+      },
     });
   }
 
-  // Send the API key to the client
-  response.status(200).json({ apiKey });
+  // In the Edge Runtime, process.env is a specially provided object.
+  const apiKey = process.env.API_KEY;
+
+  // Check if the environment variable is set
+  if (!apiKey) {
+    const errorPayload = { error: "The API_KEY environment variable is not set on the server." };
+    return new Response(JSON.stringify(errorPayload), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Send the API key back to the client
+  const successPayload = { apiKey };
+  return new Response(JSON.stringify(successPayload), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
