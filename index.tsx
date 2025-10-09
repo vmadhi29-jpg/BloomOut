@@ -2,27 +2,7 @@
 import { GoogleGenAI, Chat, Type, GenerateContentResponse } from "@google/genai";
 
 const root = document.getElementById('root');
-
-if (typeof process === 'undefined' || typeof process.env === 'undefined' || !process.env.API_KEY) {
-    const errorHTML = `
-      <div class="min-h-screen flex flex-col items-center justify-center p-4">
-        <div class="content-card max-w-lg w-full p-8 text-center rounded-2xl shadow-2xl text-white">
-            <h1 class="text-3xl font-bold mb-4">Configuration Error</h1>
-            <p class="text-slate-300">
-                This application requires an API key to be configured for it to function.
-            </p>
-            <p class="text-slate-400 mt-4 text-sm">
-                It appears <code>process.env.API_KEY</code> is not available. If you are a developer, please ensure the API key is set up in your deployment environment. If you are a user, please contact the site administrator.
-            </p>
-        </div>
-      </div>
-    `;
-    if(root) root.innerHTML = errorHTML;
-    throw new Error("API_KEY is not available in the environment. The application cannot run.");
-}
-
-const API_KEY = process.env.API_KEY;
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+let ai: GoogleGenAI;
 
 let openChat: Chat | null = null;
 let aiTherapistChat: Chat | null = null;
@@ -1788,4 +1768,49 @@ const initializeApp = () => {
     }
 };
 
-initializeApp();
+const main = async () => {
+    if (!root) return;
+
+    // Show a simple loading state while we fetch the configuration.
+    root.innerHTML = `
+      <div class="min-h-screen flex flex-col items-center justify-center p-4">
+        <div class="loading-spinner"></div>
+      </div>
+    `;
+
+    try {
+        // On Vercel, env vars are not exposed to the client by default for security.
+        // The standard practice is to create a simple API route to expose the key.
+        const response = await fetch('/api/get-key');
+        if (!response.ok) {
+            throw new Error(`Network response was not ok, status: ${response.status}`);
+        }
+        const config = await response.json();
+
+        if (typeof config.apiKey !== 'string' || config.apiKey.length === 0) {
+             throw new Error("API key is missing or invalid in the response from /api/get-key.");
+        }
+
+        ai = new GoogleGenAI({ apiKey: config.apiKey });
+        initializeApp();
+
+    } catch (error) {
+        console.error("Failed to initialize application:", error);
+        const errorHTML = `
+          <div class="min-h-screen flex flex-col items-center justify-center p-4">
+            <div class="content-card max-w-lg w-full p-8 text-center rounded-2xl shadow-2xl text-white">
+                <h1 class="text-3xl font-bold mb-4">Application Failed to Start</h1>
+                <p class="text-slate-300">
+                    Could not retrieve the required API configuration from the server.
+                </p>
+                <p class="text-slate-400 mt-4 text-sm">
+                    This is likely a deployment configuration issue. If you are the developer, please ensure the <code>API_KEY</code> environment variable is set on Vercel and the <code>/api/get-key</code> serverless function is correctly implemented to return it.
+                </p>
+            </div>
+          </div>
+        `;
+        root.innerHTML = errorHTML;
+    }
+};
+
+main();
